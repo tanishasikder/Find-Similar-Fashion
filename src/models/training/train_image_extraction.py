@@ -1,4 +1,5 @@
 import mlflow.pytorch
+from sentence_transformers import SentenceTransformer
 import torch
 import os
 import torch.nn as nn
@@ -64,17 +65,23 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=None):
                 for input, cat, attr in fashion_loaders[phase]:
                     with torch.set_grad_enabled(phase=='train'):
                         # Gets the outputs from resnet model
+                        print(len(input[0]))
                         color_pred, cat_pred, attr_pred = model(input)
                         print('we modeling now')
                         # Crossentropy loss expects raw scores
                         # COLOR NEEDS TO COME FROM ANOTHER SOURCE ITS NOT LABEL[:, 0]
                         #LABEL[:, 0] IS THE FILENAME
                         #color_loss = criterion(color, label[:, 0])
-                        cat_loss = criterion(cat_pred, cat)
-                        attr_loss = criterion(attr_pred, attr)
+                        # Match the shape of the label
+                        new_cat = cat.float().unsqueeze(1)
+                        new_attr = attr.float().unsqueeze(1)
+
+                        cat_loss = criterion(cat_pred, new_cat)
+                        new_attr = attr.float().unsqueeze(1)
+                        attr_loss = criterion(attr_pred, )
 
                         # Gets the largest score for accuracy
-                        _, color_pred = torch.max(color_pred, 1)
+                        #_, color_pred = torch.max(color_pred, 1)
                         _, cat_pred = torch.max(cat_pred, 1)
                         _, attr_pred = torch.max(attr_pred, 1)
 
@@ -121,8 +128,6 @@ if __name__ == '__main__':
 
     # Finding all the images in the folder
     dataset = ImageData()
-    print(type(dataset))
-    print(len(dataset))
 
     print('got dataset')
     # Splitting the dataset into train test

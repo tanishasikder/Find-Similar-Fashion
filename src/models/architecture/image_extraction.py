@@ -49,4 +49,5 @@ class CNN(nn.Module):
         category = self.fc_category(self.dropout2(x))
         attr = self.fc_attr(self.dropout3(x))
         # Return the classification
+
         return color, category, attr
