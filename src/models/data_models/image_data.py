@@ -12,6 +12,8 @@ from torchvision.transforms import v2
 from sentence_transformers import SentenceTransformer
 from torchvision.transforms import v2
 from torch.utils.data import Subset
+import ast
+from sklearn.preprocessing import MultiLabelBinarizer
 
 load_dotenv()
 
@@ -78,27 +80,33 @@ df = pd.read_csv(names, header=None, keep_default_na=False)
 df = df.sort_values(by=df.columns[0])
 data = clean(df)
 
+def to_list(s):
+    if s is None or s == '' or s == 'None':
+        return []
+    val = ast.literal_eval(s)
+    return val if isinstance(val, list) else []
+
+cat_codes, cat_classes = pd.factorize(data.iloc[:, 1]) # Get all the categories and attributes
+# Then encode and return as a list
+remove = data.iloc[:, 2].apply(to_list)
+encode = MultiLabelBinarizer()
+attr = encode.fit_transform(remove)
+
 def get_label_classes(encoder):
     # The labels are encoded so this makes a mapping of the decoded -> encoded
     mappings = dict(zip(encoder.classes_, range(len(encoder.classes_))))
     return mappings
 
-def image_label(out_path=l_path):
-    # Processes the labels once then use everytime
-    cat = data.iloc[:, 1].tolist() # Get all the categories and attributes
-    att = data.iloc[:, 2].tolist()
-    # Then encode and return as a list
-    en_cat = code.encode(cat, batch_size=256, convert_to_tensor=True)
-    en_att = code.encode(att, batch_size=256, convert_to_tensor=True)
-
-    torch.save({'cat': en_cat, 'attr': en_att}, out_path)
-
 class ImageData(Dataset):
-    def __init__(self, dir=cropped, transform=fashion_transform(), em_path=l_path):
+    def __init__(self, dir=cropped, transform=fashion_transform()):
         self.dir = Path(dir)
         self.transform = transform
-        labels = torch.load(em_path) # Load in premade labels
-        self.image_labels = dict(zip(data.loc[:, 0], list(zip(labels['cat'], labels['attr']))))
+        self.image_labels = {
+            fname: (torch.tensor(c, dtype=torch.long),
+                    torch.tensor(a, dtype=torch.float32))
+            for fname, c, a in zip(data.iloc[:, 0], cat_codes, attr)
+        }
+        #self.image_labels = dict(zip(data.loc[:, 0], list(zip(data.iloc[:, 1], data.iloc[:, 2]))))
         valid = set(data.iloc[:, 0].tolist())
         self.image_paths = sorted([
             path.name for path in self.dir.iterdir()
@@ -120,8 +128,6 @@ class ImageData(Dataset):
         return image, cat, attr
 
 if __name__ == "__main__":
-    # Heavy so load not at module import time. Needed only for labels not dataset
-    code = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     #image_label()
     #hi = ImageData()
     print(data.iloc[:, 0].tolist())
