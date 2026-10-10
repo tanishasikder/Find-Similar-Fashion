@@ -1,23 +1,19 @@
+import io
 import torch
 from PIL import Image
-from fastapi import HTTPException
-from src.schemas.state import ImageService
-from src.schemas.state import initialize_image_model
-import io
+from src.models.image_extraction import device
+from src.process.transform import eval_transform
+from src.schemas.state import image_preds
 
-# Gets the model predictions for color and clothing type
-async def image_output(contents: bytes):
-    try:
-        opened = Image.open(io.BytesIO(contents))
-        # Get the image model put into app
-        image_model = initialize_image_model(ImageService)
-        # Perform inference
-        with torch.no_grad():
-            color, cat, attr = image_model(opened)
-        
-        return color, cat, attr
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Sorry. Prediction Failed")
+transform = eval_transform()
 
+# Gets the model predictions for color, clothing type, and attributes
+def predict_image(model, contents: bytes):
+    opened = Image.open(io.BytesIO(contents)).convert('RGB')
+    # Same preprocessing as testing, plus a batch dimension
+    batch = transform(opened).unsqueeze(0).to(device)
+    # Perform inference
+    with torch.no_grad():
+        color, cat, attr = model(batch)
 
-
+    return image_preds(model, color, cat, attr)

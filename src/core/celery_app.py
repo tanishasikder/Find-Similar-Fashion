@@ -1,21 +1,34 @@
+import base64
 from celery import Celery
-from kombu import Queue
-from fastapi import HTTPException, Request
-import torch
+from celery.signals import worker_process_init
 from .config import Settings
-from src.services.predict import image_output
-from src.schemas.state import image_preds
+from src.schemas.state import load_image_model
+from src.services.predict import predict_image
 celery_app = Celery('fashionproject')
 
 # No need to load from env when you do this
 celery_app.config_from_object(Settings)
 
-celery_app.task_routes = {
-    'predict_img' : {'queue' : 'queue_image'}
+celery_app.conf.task_routes = {
+    'predict-img' : {'queue' : 'queue_image'}
 }
 
-@celery_app.task(name='predict-img', queue='queue_image') # Use the model and img from routers
-def process_img(image_bytes: bytes):
-    color, cat, attr = image_output(image_bytes) # Opens, preprocesses, and predicts
-    true_color, true_cat, true_attr = image_preds(color, cat, attr)
-    return true_color, true_cat, true_attr
+# The worker is a separate process from the api so it can't see app.state.
+# Each worker process loads the model once and reuses it for every task
+image_model = None
+
+def get_model():
+    global image_model
+    if image_model is None:
+        image_model = load_image_model()
+    return image_model
+
+@worker_process_init.connect
+def load_model(**kwargs):
+    get_model()
+
+@celery_app.task(name='predict-img', queue='queue_image')
+def process_img(image_b64: str):
+    # Task args are sent as json, so the image comes in base64 encoded
+    contents = base64.b64decode(image_b64)
+    return predict_image(get_model(), contents) # Opens, preprocesses, and predicts

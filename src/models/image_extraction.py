@@ -1,24 +1,19 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
 from torchvision.models import vgg16, VGG16_Weights
-import numpy as np
-from PIL import Image
-from dotenv import load_dotenv
-import os
 
 # Push to GPU if it is available, CPU if not
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # CNN class to classify image features
 class CNN(nn.Module):
-    def __init__(self, co_names, cat_names, attr_names):
+    def __init__(self, co_names, cat_names, attr_names, pretrained=True):
         super().__init__()
         self.color_names = co_names
         self.category_names = cat_names
         self.apparels = attr_names
-        # Load in the pretrained vgg16 model
-        model = models.vgg16(weights=VGG16_Weights.DEFAULT)
+        # Load in the pretrained vgg16 model. Skip the download when trained weights get loaded over it
+        model = vgg16(weights=VGG16_Weights.DEFAULT if pretrained else None)
 
         # Freeze parameters
         for param in model.features.parameters():

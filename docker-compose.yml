@@ -2,7 +2,7 @@ services:
   api:
     build: .
     command: >
-      gunicorn main:app
+      gunicorn src.main:app
       --workers 3
       --worker-class uvicorn.workers.UvicornWorker
       --bind 0.0.0.0:8000
@@ -18,7 +18,7 @@ services:
   
   celery_worker:
     build: .
-    command: celery -A src.core.celery_app.py --loglevel=info -Q queue_image --concurrency=1
+    command: celery -A src.core.celery_app --loglevel=info -Q queue_image --concurrency=1
     env_file : .env
     environment:
       REDIS_URL: redis://redis:6379/0

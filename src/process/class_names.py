@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import json
 from collections import defaultdict
-import json
 
 load_dotenv()
 
@@ -27,18 +26,18 @@ def get_images():
         file = json.load(t)
 
     # They are just IDs so need to decode them later on
-    for i in range(333401): # Length of annotations
-        values = {'image_id' : file['annotations'][i]['image_id'], 
-                  'attribute_id' : file['annotations'][i]['attribute_ids'],
-                  'category_id' : file['annotations'][i]['category_id'],
-                  'bbox' : file['annotations'][i]['bbox']}
+    for annotation in file['annotations']:
+        values = {'image_id' : annotation['image_id'],
+                  'attribute_id' : annotation['attribute_ids'],
+                  'category_id' : annotation['category_id'],
+                  'bbox' : annotation['bbox']}
 
         images_temp.append(values)
 
-    for j in range(45623): # How many images in train
+    for image in file['images']:
         # Get file name and ID to match the other list with
-        file_names.append({'name' : file['images'][j]['file_name'], 
-                           'id' : file['images'][j]['id']})
+        file_names.append({'name' : image['file_name'],
+                           'id' : image['id']})
 
     return file_names, images_temp
 
@@ -72,7 +71,7 @@ def decode_images(images, images_temp):
     # Each image has only one category
     categories = file['categories']
     attributes = file['attributes']
-     # Index annotations by image_id once, instead of rescanning images_temp every loop
+    # Index annotations by image_id 
     by_image_id = defaultdict(list)
     for item in images_temp:
         by_image_id[item['image_id']].append(item)
@@ -91,21 +90,8 @@ def decode_images(images, images_temp):
             else:
                 attr = 'None'
 
-            if img in processed:
-                processed[img].append([cat, attr, bbox])
-            else:
-                processed[img] = [cat, attr, bbox]
+            # Every image is a list of [cat, attr, bbox], one per object
+            processed.setdefault(img, []).append([cat, attr, bbox])
 
     return processed
-
-'''
-file_names, images_temp = get_images()
-images = process_values(file_names)
-#print(len(images_temp))
-#print(len(images))
-processed = decode_images(images, images_temp)
-#print(len(processed))
-#with open('clothing_labels.json', 'w') as f:
-#    json.dump(processed, f, indent=4)
-'''
 

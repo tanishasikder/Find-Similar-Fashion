@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 current_dir = Path(__file__).resolve().parent
-root_dir = current_dir.parents[2]
+root_dir = current_dir.parents[1]
 
 sys.path.insert(0, str(root_dir)) # Fix the path before importing below classes
 

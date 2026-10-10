@@ -1,42 +1,35 @@
 from contextlib import asynccontextmanager
-import os
-import sys
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from supabase import create_client, Client
-import mlflow
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import httpx
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from routers.input_router import router as input_router
-from routers.db_router import router as db_router
 from src.core.limiter import limiter
-
-def database():
-    supabase: Client = create_client(
-        os.getenv('SUPABASE_URL'), # Initialize database
-        os.getenv('SUPABASE_KEY')
-    )
-    bucket = supabase.storage.from_(os.getenv('BUCKET_NAME'))
-    return bucket
+from src.core.tracking_config import Dagshub_Track
+from src.routers.input_router import router as input_router
+from src.routers.db_router import router as db_router
+from src.schemas.state import load_image_model
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    database()
+    # Everything here loads once at startup and is shared by every request
+    tracker = Dagshub_Track() # Use the DagsHub Mlflow server to log things
+    tracker.initialize()
+    app.state.tracker = tracker
+
+    app.state.image_model = load_image_model()
+
     # Initialize a shared source (http client pool)
-    http_client = httpx.AsyncClient()
-    app.state.http_client = http_client
+    app.state.http_client = httpx.AsyncClient()
 
     yield # Let the app process
 
-    await http_client.aclose()
+    await app.state.http_client.aclose()
 
-app = FastAPI()
-    
-app.mount("/static", StaticFiles(directory="./"))
+app = FastAPI(lifespan=lifespan)
+
+app.mount("/static", StaticFiles(directory="Frontend"))
 
 app.include_router(input_router) # For accepting user inputs
 app.include_router(db_router) # For storing in the database
@@ -44,11 +37,3 @@ app.include_router(db_router) # For storing in the database
 app.state.limiter = limiter # Initializes the rate limiter
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-
-
-
-
-
-    

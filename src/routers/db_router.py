@@ -1,12 +1,11 @@
-from fastapi import Request, Depends, UploadFile, File
+from typing import List
+from fastapi import APIRouter, Request, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
-from src.services.database import supabase
-from models import image_extraction
 from fastapi.templating import Jinja2Templates
 import os
-from src.routers.input_router import router
-from src.main import limiter 
-from fastapi import APIRouter, Request
+from src.core.limiter import limiter
+from src.schemas.db import supabase
 from src.services.insert import add_clothes
 router = APIRouter()
 
@@ -16,40 +15,34 @@ templates = Jinja2Templates(directory=TEMPLATE_PATH)
 
 @router.get("/", response_class=HTMLResponse)
 @limiter.limit('3/minute')
-async def read_clothes(request: Request): 
-    '''
-    Use in services/db_service/ insert function 
-    read_clothes, add_clothes_form
-    '''
-    return request
-
-@router.post('/add')
-@limiter.limit('3/minute')
-async def get_clothes( 
-    request : Request, # Need this or limiter will not work
-    clothes : image_extraction = Depends(image_extraction.as_form),
-    image: UploadFile = File(None), 
-):
-    '''
-    Use for services/db_service/insert 
-    function add_clothes.
-
-    Clothes is used by Depends(image_extraction.as_form), 
-    which gives you a Pydantic model instance from form 
-    data the user submitted
-    '''
-    if image and image.filename != "":
-        file = image.filename
-        content = await image.read()
-
-        add_clothes(file, content, clothes)
-
 def read_clothes(request: Request):
+    # Shows every active piece of clothing in the database
     response = supabase.table('clothes').select('*').eq('is_active', True).execute()
     clothes = response.data
     return templates.TemplateResponse('info.html', {'request': request, 'clothes': clothes})
 
+@router.get('/add', response_class=HTMLResponse)
 def add_clothes_form(request: Request):
     return templates.TemplateResponse('add_clothes.html', {'request': request})
 
-        
+@router.post('/add')
+@limiter.limit('3/minute')
+async def get_clothes(
+    request : Request, # Need this or limiter will not work
+    color: str = Form(...),
+    category: str = Form(...),
+    attributes: List[str] = Form([]),
+    image: UploadFile = File(None),
+):
+    '''
+    Stores the clothing (and its image if one was given) using
+    services/insert function add_clothes, then redirects to /
+    '''
+    clothes = {'color': color, 'category': category, 'attributes': attributes}
+    file, content = None, None
+    if image and image.filename != "":
+        file = image.filename
+        content = await image.read()
+
+    # Supabase calls block so run them off the event loop
+    return await run_in_threadpool(add_clothes, content, file, clothes)

@@ -10,6 +10,6 @@ COPY requirements.txt .
 COPY . .
 
 # Build docker image from MLflow model
-RUN pip install --no-cache-dir -r requirementss.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["gunicorn", "main:app", "--workers", "3", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "src.main:app", "--workers", "3", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
