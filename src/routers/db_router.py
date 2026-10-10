@@ -1,13 +1,13 @@
 from fastapi import Request, Depends, UploadFile, File
 from fastapi.responses import HTMLResponse
-from src.services.db_service.database import supabase
+from src.services.database import supabase
 from models import image_extraction
 from fastapi.templating import Jinja2Templates
 import os
 from src.routers.input_router import router
 from src.main import limiter 
 from fastapi import APIRouter, Request
-from src.services.db_service.insert import add_clothes
+from src.services.insert import add_clothes
 router = APIRouter()
 
 TEMPLATE_PATH=os.getenv('TEMPLATE_PATH')

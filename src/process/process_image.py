@@ -6,18 +6,18 @@ import json
 import csv
 from dotenv import load_dotenv
 
-root_dir = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(root_dir)) # So this works as a script and as an import
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, where .env lives
+sys.path.insert(0, str(BASE_DIR)) # So this works as a script and as an import
 
 from src.process.process_color import hex_to_category
 
 load_dotenv()
 
-categories = os.environ.get('TYPE_LABEL')
-cloth_labels = os.environ.get('FASHION_LABELS')
-cloth_images = os.environ.get('IMAGE_FASHION_DIR')
-crop_images = os.environ.get('CROPPED_IMAGES')
-crop_csv = os.environ.get('CROPPED_CSV', 'image_crop.csv')
+categories = BASE_DIR / os.getenv('TYPE_LABEL')
+cloth_labels = BASE_DIR / os.getenv('FASHION_LABELS')
+cloth_images = BASE_DIR / os.getenv('IMAGE_FASHION_DIR')
+crop_images = BASE_DIR / os.getenv('CROPPED_IMAGES')
+crop_csv = BASE_DIR / os.getenv('CROPPED_CSV', 'image_crop.csv')
 
 def get_type_labels():
     objects = []

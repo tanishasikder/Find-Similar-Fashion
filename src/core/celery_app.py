@@ -3,8 +3,8 @@ from kombu import Queue
 from fastapi import HTTPException, Request
 import torch
 from .config import Settings
-from src.services.model_service.predict import image_output
-from src.services.model_service.verify import image_preds
+from src.services.predict import image_output
+from src.schemas.state import image_preds
 celery_app = Celery('fashionproject')
 
 # No need to load from env when you do this

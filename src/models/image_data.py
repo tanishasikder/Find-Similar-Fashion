@@ -15,8 +15,10 @@ from src.process.transform import fashion_transform
 
 load_dotenv()
 
-cropped = os.environ.get('CROPPED_IMAGES')
-names = os.environ.get('CROPPED_CSV')
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, where .env lives
+
+cropped = BASE_DIR / os.getenv('CROPPED_IMAGES')
+names = BASE_DIR / os.getenv('CROPPED_CSV')
 
 # Columns in the csv: file name, color, category, attributes
 FILE, COLOR, CATEGORY, ATTR = 0, 1, 2, 3

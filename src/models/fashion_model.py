@@ -15,7 +15,9 @@ import torch
 
 load_dotenv()
 
-files = os.environ.get('CROPPED_CSV')
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, where .env lives
+
+files = BASE_DIR / os.getenv('CROPPED_CSV')
 
 # Load in images in the order of the csv file
 class FashionData(Dataset):

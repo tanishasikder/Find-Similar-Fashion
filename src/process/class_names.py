@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os 
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import json
@@ -8,8 +9,10 @@ import json
 
 load_dotenv()
 
-annotations=os.getenv('ANNOTATION_DIR')
-path = annotations + '\\train_annotations.json'
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, where .env lives
+
+annotations = BASE_DIR / os.getenv('ANNOTATION_DIR')
+path = annotations / 'train_annotations.json'
 
 
 def get_images():

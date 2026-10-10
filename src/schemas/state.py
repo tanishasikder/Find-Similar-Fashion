@@ -10,49 +10,54 @@ from pathlib import Path
 import sys
 from joblib import load
 from PIL import Image
-import numpy as np
-
+import json
+from dotenv import load_dotenv
+import os
 # Makes python looks at the parent root directories to find the model
-parent = Path(__file__).parent
-path = parent / "stats_model.joblib"
+load_dotenv()
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-
-mean = np.array([0.485, 0.456, 0.406])
-std = np.array([0.229, 0.224, 0.225])
-
-# Transformations for user input images
-data_transforms = transforms.Compose([
-    transforms.CenterCrop(224),
-    #transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize(mean, std)
-])
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, where .env lives
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+class_names = BASE_DIR / os.getenv('CLASS_LABELS')
+cnn = BASE_DIR / os.getenv('IMAGE_MODEL')
+
 # Loops through the file names and stores all colors and categories
-def get_color_category():
-    path = 'Fashion_Images/train'
-    files = os.listdir(path)
-    color = [file[:file.index('_')] for file in files]
-    category = [file[file.index('_')+1:] for file in files]
+def classes():
+    with open(class_names, "r") as f:
+        labels = json.load(f)
 
-    return color, category
+    co = labels["color"]
+    ca = labels["category"]
+    attr = labels["attribute"]
 
-def initialize_stats_model(StatsService):
-    path = parent / "stats_model.joblib"
-    # deffo wrong try again
-    stats_model = load(path)
-    return StatsService(stats_model)
+    return co, ca, attr
 
-def initialize_image_model(CNN): # Why do we have this when we have the model from dagshub
-    color, category = get_color_category()
+def initialize_image_model(): 
+    co, ca, attr = classes()
     # Loading in the clothing predict model with error handling 
-    image_model = CNN(color, category)
+    image_model = cnn(co, ca, attr)
     # Loading in custom weights
-    torch_path = parent / "image_state_dict.pth"
+    torch_path = BASE_DIR / "image_extraction_model.pth"
     image_model.load_state_dict(torch.load(torch_path, map_location=device))
     image_model.eval()
 
     return image_model
+
+def image_preds(color_pred, cat_pred, attr_pred):
+    '''
+    Get the english words for the color and category.
+    This is used after prediction
+    '''
+    # We need this to find the true english labels
+    colors, cats, attrs = classes()
+
+    color_arg = torch.argmax(color_pred, dim=1)
+    cat_arg = torch.argmax(cat_pred, dim=1)
+    attr_arg = torch.argmax(attr_pred, dim=1)
+
+    # Find the color and category based on the gotten index
+    color, cat, attr = colors[color_arg], cats[cat_arg], attrs[attr_arg]
+
+    return color, cat, attr

@@ -27,7 +27,7 @@ from src.api.services.rag import get_rag_response
 router = APIRouter()
 
 # Loading in the custom model
-from src.models.architecture.image_extraction import CNN
+from src.models.image_extraction import CNN
 from src.models.training.sales_predict import MTGBM
 
 # Makes python looks at the parent root directories to find the model

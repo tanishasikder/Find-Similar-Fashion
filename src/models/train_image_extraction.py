@@ -19,8 +19,8 @@ root_dir = current_dir.parents[2]
 sys.path.insert(0, str(root_dir)) # Fix the path before importing below classes
 
 from src.core.tracking_config import Dagshub_Track
-from src.models.architecture.image_extraction import CNN, device
-from src.models.data_models.image_data import ImageData, get_class_names
+from src.models.image_extraction import CNN, device
+from src.models.image_data import ImageData, get_class_names
 from src.process.transform import fashion_transform, eval_transform
 
 load_dotenv()

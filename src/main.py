@@ -23,6 +23,17 @@ def database():
     bucket = supabase.storage.from_(os.getenv('BUCKET_NAME'))
     return bucket
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    database()
+    # Initialize a shared source (http client pool)
+    http_client = httpx.AsyncClient()
+    app.state.http_client = http_client
+
+    yield # Let the app process
+
+    await http_client.aclose()
+
 app = FastAPI()
     
 app.mount("/static", StaticFiles(directory="./"))
