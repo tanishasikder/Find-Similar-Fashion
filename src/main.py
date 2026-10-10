@@ -13,7 +13,7 @@ import httpx
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from routers.input_router import router as input_router
 from routers.db_router import router as db_router
-from core.limiter import limiter
+from src.core.limiter import limiter
 
 def database():
     supabase: Client = create_client(

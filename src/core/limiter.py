@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-redis_url = os.getenv('RED_URL')
+redis_url = os.getenv('REDIS_URL')
 
 limiter = Limiter(key_func=get_remote_address, storage_uri=redis_url)
 

@@ -11,14 +11,11 @@ celery_app = Celery('fashionproject')
 celery_app.config_from_object(Settings)
 
 celery_app.task_routes = {
-    'tasks.predict_img' : {'queue' : 'queue_image'}
+    'predict_img' : {'queue' : 'queue_image'}
 }
 
 @celery_app.task(name='predict-img', queue='queue_image') # Use the model and img from routers
 def process_img(image_bytes: bytes):
-    try:
-        color, cat, attr = image_output(image_bytes) # Opens, preprocesses, and predicts
-        true_color, true_cat, true_attr = image_preds(color, cat, attr)
-        return true_color, true_cat, true_attr
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    color, cat, attr = image_output(image_bytes) # Opens, preprocesses, and predicts
+    true_color, true_cat, true_attr = image_preds(color, cat, attr)
+    return true_color, true_cat, true_attr

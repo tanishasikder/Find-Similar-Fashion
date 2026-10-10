@@ -1,26 +1,41 @@
 services:
   api:
     build: .
+    command: >
+      gunicorn main:app
+      --workers 3
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
     env_file:
       - .env 
-    ports:
-      - "8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
+    expose:
+      - "8000"
     depends_on:
       - redis
     restart: always
-
-redis:
-  image: redis:latest
-  ports:
-    - "6379:6379"
-nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - web
+  
+  celery_worker:
+    build: .
+    command: celery -A src.core.celery_app.py --loglevel=info -Q queue_image --concurrency=1
+    env_file : .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends on:
+      - redis 
+      - db
     restart: always
+
+  redis:
+    image: redis:7-alphine
+  
+  nginx:
+      image: nginx:1.27
+      ports:
+        - "80:80"
+      volumes:
+        - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      depends_on:
+        - api
+      restart: always

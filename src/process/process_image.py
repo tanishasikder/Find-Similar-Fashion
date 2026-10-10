@@ -1,18 +1,15 @@
 from PIL import Image
 from pathlib import Path
 import os
+import sys
 import json
-import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
 import csv
-import numpy as np
 from dotenv import load_dotenv
-from torch.utils.data import Dataset
-import datetime
-import torchvision.transforms.v2 as transforms
+
+root_dir = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(root_dir)) # So this works as a script and as an import
+
+from src.process.process_color import hex_to_category
 
 load_dotenv()
 
@@ -20,18 +17,18 @@ categories = os.environ.get('TYPE_LABEL')
 cloth_labels = os.environ.get('FASHION_LABELS')
 cloth_images = os.environ.get('IMAGE_FASHION_DIR')
 crop_images = os.environ.get('CROPPED_IMAGES')
+crop_csv = os.environ.get('CROPPED_CSV', 'image_crop.csv')
 
 def get_type_labels():
     objects = []
     detailed = []
 
-    for file, mid, dirs in os.walk(categories):
-        for d in dirs:
-            with open(f'{categories}\\{d}', 'r', encoding='utf-8') as f:
-                if d == 'objects.txt':
-                    objects.append(f.read().splitlines())
-                elif d == 'fine_details.txt':
-                    detailed.append(f.read().splitlines())
+    for d in os.listdir(categories):
+        with open(os.path.join(categories, d), 'r', encoding='utf-8') as f:
+            if d == 'objects.txt':
+                objects.extend(f.read().splitlines())
+            elif d == 'fine_details.txt':
+                detailed.extend(f.read().splitlines())
 
     return objects, detailed
 
@@ -42,66 +39,79 @@ def image_labels():
     return labels
 
 def extract_labels(labels, file):
-    return labels.get(file) # These functions process the gotten index
+    '''
+    Each image is stored as [cat, attr, bbox, [cat, attr, bbox], ...].
+    The first object is flattened into the list so split it back out
+    to get a list of [cat, attr, bbox] for every object.
+    '''
+    values = labels.get(file)
+    if not values:
+        return []
+    if isinstance(values[0], str):
+        return [values[:3]] + values[3:]
+    return values
 
-def get_data(values, dirs, mid):
-    with open('image_crop.csv', 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        for val in values:
-            if isinstance(val[-1], list):
-                crop, dimen = crop_image(val[-1], dirs, mid)
+def get_data(values, file, folder, writer, done):
+    with open(os.path.join(folder, file), 'rb') as f:
+        img = Image.open(f).convert('RGB')
 
-                if crop == 'continue':
-                    continue # Skip if things are wrong.
+    for val in values:
+        if len(val) != 3 or not isinstance(val[-1], list):
+            continue # Skip if things are wrong.
 
-                # Need to make the filenames unique so use dimen and separate with _
-                # Having the dimensions makes the filenames always the same if you
-                # Run the code again
-                id = "".join(dimen)
-                file_name = f'{id}_{dirs}'
-                path = Path(crop_images) / file_name # Save with a different file everytime
+        crop, dimen = crop_image(img, val[-1])
+        if crop is None:
+            continue
 
-                cat = val[-3]
-                attr = val[-2]
+        # Need to make the filenames unique so use dimen and separate with _
+        # Having the dimensions makes the filenames always the same if you
+        # Run the code again
+        id = "".join(dimen)
+        file_name = f'{id}_{file}'
+        if file_name in done:
+            continue
+        done.add(file_name)
 
-                writer.writerow([file_name, cat, attr])
-                crop.save(path)
+        color = hex_to_category(crop) # Used to classify image color
+        cat = val[-3]
+        attr = val[-2]
 
-def crop_image(values, file, mid):
-    with open(os.path.join(mid, file), 'rb') as f:
-        img = Image.open(f)
+        crop.save(Path(crop_images) / file_name)
+        writer.writerow([file_name, color, cat, attr])
 
-        if len(values) < 4:
-            return 'continue', 0
-        
-        x, y, w, h = values # Fashionpedia does not follow PIL format
+def crop_image(img, values):
+    if len(values) < 4:
+        return None, None
 
-        if w <= 0 or h <= 0:
-            return 'continue', 0
+    x, y, w, h = values # Fashionpedia does not follow PIL format
 
-        left = x
-        top = y
-        right = x + w
-        bottom = y + h
-        dimen = [left, top, right, bottom]
+    if w <= 0 or h <= 0:
+        return None, None
 
-        crop = img.crop(dimen)
-        id = [str(x) for x in dimen]
-        if crop:
-            # Return the dimension to label the file later on
-            return crop, id
-        
+    dimen = [x, y, x + w, y + h] # left, top, right, bottom
+    crop = img.crop(dimen)
+    # Return the dimension to label the file later on
+    return crop, [str(v) for v in dimen]
+
 def pass_images():
     labels = image_labels() # Mapping of file -> categories, attributes
-    #required = set(f.split('_', 1)[1] for f in os.listdir(crop_images))
-    for file, mid, dirs in os.walk(cloth_images):
-        for i in dirs:
-            values = extract_labels(labels, i) 
-            if values:  # Most are lists values[-1][-1] but some are floats. find out which ones
-                get_data(values, i, file)
+    Path(crop_images).mkdir(parents=True, exist_ok=True)
+    Path(crop_csv).parent.mkdir(parents=True, exist_ok=True)
 
-#pass_images()
-'''
-Open with PIL.Image.open("image.jpg"), crop with img.crop((xmin, ymin, xmax, ymax)), 
-then transform to a tensor using torchvision.transforms.v2.functional.to_image.
-'''
+    # Rows already written are skipped so the csv never gets duplicates
+    # and a stopped run can pick back up where it left off
+    done = set()
+    if os.path.exists(crop_csv):
+        with open(crop_csv, 'r', newline='', encoding='utf-8') as f:
+            done = {row[0] for row in csv.reader(f) if row}
+
+    with open(crop_csv, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        for folder, _, files in os.walk(cloth_images):
+            for file in files:
+                values = extract_labels(labels, file)
+                if values:
+                    get_data(values, file, folder, writer, done)
+
+if __name__ == '__main__':
+    pass_images()

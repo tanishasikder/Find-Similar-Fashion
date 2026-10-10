@@ -17,7 +17,7 @@ class CNN(nn.Module):
         self.color_names = co_names
         self.category_names = cat_names
         self.apparels = attr_names
-        # Load in the pretrained resnet model
+        # Load in the pretrained vgg16 model
         model = models.vgg16(weights=VGG16_Weights.DEFAULT)
 
         # Freeze parameters
@@ -34,6 +34,7 @@ class CNN(nn.Module):
         # Head to classify the clothing category
         self.fc_category = nn.Linear(num_features, len(cat_names))
         self.dropout2 = nn.Dropout(0.5)
+        # Head to classify the attributes (multi label)
         self.fc_attr = nn.Linear(num_features, len(attr_names))
         self.dropout3 = nn.Dropout(0.5)
         self.to(device)
@@ -43,11 +44,11 @@ class CNN(nn.Module):
         x = self.vgg16_features(x)
         x = self.avgpool(x)
         # Flatten the features so it can be used in linear layers
-        # Goes from [batch, 512, 1, 1] to [batch, 512]
+        # Goes from [batch, 512, 7, 7] to [batch, 512 * 7 * 7]
         x = torch.flatten(x, 1)
         color = self.fc_color(self.dropout1(x))
         category = self.fc_category(self.dropout2(x))
         attr = self.fc_attr(self.dropout3(x))
-        # Return the classification
+        # Return the raw scores. Use softmax for color/category, sigmoid for attr
 
         return color, category, attr

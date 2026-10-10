@@ -1,123 +1,66 @@
-import torch
-import os
-import copy
-import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
-from torchvision import datasets, transforms
-import numpy as np
+import colorsys
 from PIL import Image
-from pathlib import Path
-from dotenv import load_dotenv
-from torch.utils.data import Dataset
-from torch.utils.data import random_split
-import matplotlib.pyplot as plt
 
-load_dotenv()
-
-# Used the normalize the inputs
-mean = np.array([0.485, 0.456, 0.406])
-std = np.array([0.229, 0.224, 0.225])
-
-color_dir = os.environ.get('COLOR_DIR')
-
-def color_transform():
-    color_transforms = {
-        'train' : transforms.Compose([
-            transforms.Resize(256),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-        ]),
-        'val' : transforms.Compose([
-            transforms.Resize(256),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-        ])
-    }
-    return color_transforms
-
-def process_colors():
-    color_dict = {}
-    paths = []
-
-    for path, mid, file in os.walk(color_dir):
-        marker = path.find('colors\\')
-        paths.append(path[:marker+7]) # For opening the image later on. Need full path
-        path = path[marker+7:]
-
-        color_dict[path] = file
-
-    # Remove first value its the file path to whole folder
-    (k := next(iter(color_dict)), color_dict.pop(k))
-
-    return color_dict, paths
-
-def encoding(name):
-    codes = get_colors()
-
-    if name in codes.keys():
-        return codes[name]
-        
-def make_data(data, paths, transform):
-    labels, images = [], []
-    for index, (key, value) in enumerate(data.items()):
-        marker = key.find('\\')  # All this for class names
-        
-        if marker == -1:
-            continue
-        else:
-            color = key[:marker]
-
-        for file in value:
-            with open(f'{paths[index]}\\{key}\\{file}', 'rb') as f:
-                img = Image.open(f)
-                image_trans = transform['train']
-                image = image_trans(img)
-
-                name = encoding(color)
-                labels.append(name)
-                images.append(image)
-
-    return labels, images
-
-def split_data(colors):
-    train, test = random_split(colors, [0.8, 0.2])
-    return train, test
+# Fixed order so the color head always uses the same index for each color
+COLOR_NAMES = [
+    'black', 'white', 'gray', 'brown', 'red', 'orange',
+    'yellow', 'green', 'cyan', 'blue', 'purple', 'pink',
+]
 
 def get_colors():
-    codes = { # Pytorch datasets encode labels with data
-        'Black' : 0,
-        'Blue' : 1,
-        'Gray' : 2,
-        'Orange' : 3,
-        'Pink' : 4,
-        'Purple' : 5,
-        'Skyblue' : 7,
-        'White' : 8,
-        'Yellow' : 9
-    }
-    return codes
+    # Pytorch datasets encode labels with data
+    return {name: i for i, name in enumerate(COLOR_NAMES)}
 
-class ColorData(Dataset):
-    def __init__(self, labels, images):
-        self.labels = labels
-        self.images = images
+def dominant_rgb(img, num_colors=4):
+    '''
+    Gets the most common color in the middle of the crop. The edges of
+    a bounding box are usually background so only the center is used.
+    '''
+    img = img.convert('RGB')
+    w, h = img.size
+    center = img.crop((w // 4, h // 4, w - w // 4, h - h // 4))
+    if center.width == 0 or center.height == 0:
+        center = img # Crop is too small to take the center of
 
-    def __len__(self):
-        return len(self.images)
-    
-    def __getitem__(self, index):
-        sample = {
-            'labels' : torch.tensor(self.labels[index]),
-            'images' : torch.tensor(self.images[index])
-        }
-        return sample
+    center.thumbnail((64, 64))
+    # Quantize groups similar shades together then take the biggest group
+    quantized = center.quantize(colors=num_colors)
+    palette = quantized.getpalette()
+    _, index = max(quantized.getcolors())
+    return tuple(palette[index * 3:index * 3 + 3])
 
-def get_color_data():
-    dict, paths = process_colors()    
-    transform = color_transform()
-    labels, images = make_data(dict, paths, transform)
-    colors = ColorData(labels, images)
-    train, test = split_data(colors)
+def rgb_to_hex(img):
+    # Convert img to rgb value then return hex format
+    return '#{:02x}{:02x}{:02x}'.format(*dominant_rgb(img))
 
-    return train, test
+def hex_to_category(img):
+    '''
+    Fashionpedia does not have color. Map images with
+    hexcodes then define a category with this.
+    '''
+    hex = rgb_to_hex(img)
+    hex_code = hex.lstrip('#')
+    r, g, b = (int(hex_code[i:i+2], 16) / 255 for i in (0, 2, 4))
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    h *= 360
+
+    # achromatic cases first
+    if v < 0.15:
+        return 'black'
+    if s < 0.10:
+        return 'white' if v > 0.85 else 'gray'
+
+    # brown: dark-ish orange/red/yellow hues
+    if 15 <= h < 50 and v < 0.6:
+        return 'brown'
+
+    # hue bins
+    bins = [
+        (15, 'red'), (45, 'orange'), (70, 'yellow'),
+        (165, 'green'), (200, 'cyan'), (260, 'blue'),
+        (300, 'purple'), (345, 'pink'), (360, 'red'),
+    ]
+    for upper, name in bins:
+        if h < upper:
+            return name
+    return 'red'
