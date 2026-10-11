@@ -1,76 +1,124 @@
+
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain.tools import tool
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.agents import create_agent
 
-def make_agent(): # Rate limiter
-    # LangChain logs everything to LangSmith on its own when LANGSMITH_TRACING is set
+load_dotenv()
 
-    # Getting API key
-    huggingface = os.getenv("HUGGINGFACE_API_KEY")
+PDF_PATH = Path("fashion.pdf")
+INDEX_NAME = os.environ["PINECONE_INDEX_NAME"]
+NAMESPACE = "fashion-research"
 
-    model = init_chat_model(
-        "microsoft/Phi-3-mini-4k-instruct",
-        model_provider="huggingface",
-        temperature=0.7,
-        max_tokens=1023,
-        api_key=huggingface
+
+def get_embeddings():
+    return GoogleGenerativeAIEmbeddings(
+        model="gemini-embedding-001",
+        google_api_key=os.environ["GOOGLE_API_KEY"],
+        output_dimensionality=768,
     )
 
-    # Initializing embeddings model
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
 
-    # Storing the embeddings
-    storage = InMemoryVectorStore(embeddings)
-
-    # Loading in a source with consumer information for clothes
-    # Background information to store for the LLM
-    fashion_loader = PyPDFLoader(
-        "https://globusjournal.com/wp-content/uploads/2024/11/GMIT-JD24-161-7-Vibha-Chandrakar.pdf"
-    )
-    docs = fashion_loader.load() # One document per pdf page
-
-    # Splitting docs into chunks
-    chunk_maker = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=10,
-        add_start_index=True, #track index in original document
+def get_vector_store():
+    """Connect to an existing Pinecone index."""
+    return PineconeVectorStore(
+        index_name=INDEX_NAME,
+        embedding=get_embeddings(),
+        namespace=NAMESPACE,
     )
 
-    total_chunks = chunk_maker.split_documents(docs)
 
-    # Embed and store all the chunks of documents
-    documents = storage.add_documents(documents=total_chunks)
-
-    @tool(response_format="context_and_artifact")
-    def retrieval_context(query: str):
-        '''retrieve information to help answer a query'''
-        retrieved_docs = storage.similarity_search(query, k=2)
-        serialized = "\n\n".join(
-            (f"source: {doc.metadata}\nContent: {doc.page_content}")
-            for doc in retrieved_docs
+def ingest_pdf():
+    """Run once to load fashion.pdf and index its chunks."""
+    if not PDF_PATH.is_file():
+        raise FileNotFoundError(
+            f"Could not find {PDF_PATH.resolve()}"
         )
-        return serialized, retrieved_docs
 
-    tools = [retrieval_context]
+    loader = PyPDFLoader(str(PDF_PATH))
+    docs = loader.load()
 
-    prompt = (
-        "You are a data scientist that is given information regarding "
-        "an employers clothing idea. Based on specific criteria, give "
-        "predictions on how that piece of clothing will do in the market. "
-        "I will give predictions on profit margin, quantity sold, and total "
-        "amount of items sold. You must take this information along with the "
-        "sources given and generate a summary and predictions."
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+        add_start_index=True,
     )
-    agent = create_agent(model, tools, system_prompt=prompt)
+    chunks = splitter.split_documents(docs)
 
-    return agent
+    # Attach source metadata for traceability.
+    for chunk in chunks:
+        chunk.metadata["source"] = PDF_PATH.name
+
+    store = get_vector_store()
+    store.add_documents(chunks)
+
+    return len(chunks)
+
+
+def make_agent():
+    """Create the Gemini agent and connect its retrieval tool."""
+    model = init_chat_model(
+        "google_genai:gemini-2.5-flash",
+        temperature=0.2,
+        max_tokens=2048,
+    )
+
+    store = get_vector_store()
+
+    from langchain.tools import tool
+
+    @tool(response_format="content_and_artifact")
+    def retrieval_context(query: str):
+        """Search fashion research in Pinecone for relevant evidence."""
+        docs = store.similarity_search(query, k=4)
+
+        if not docs:
+            return "No relevant documents found.", []
+
+        context = "\n\n".join(
+            f"Source: {doc.metadata.get('source', 'unknown')}, "
+            f"page: {doc.metadata.get('page', 'unknown')}\n"
+            f"{doc.page_content}"
+            for doc in docs
+        )
+
+        return context, docs
+
+    system_prompt = """
+        The user wants to find similar clothes to what they
+        uploaded. Describe the clothes they uploaded along with
+        information given about recent fashion trends/
+
+        Context: {context}
+    """
+
+    from langchain.agents import create_agent
+
+    return create_agent(
+        model,
+        tools=[retrieval_context],
+        system_prompt=system_prompt,
+    )
+
 
 async def get_rag_response(query: str):
     agent = make_agent()
-    response = await agent.ainvoke({"messages": [{"role": "user", "content": query}]})
-    return response
+
+    response = await agent.ainvoke({
+        "messages": [
+            {"role": "user", "content": query}
+        ]
+    })
+
+    # Return the final assistant message, not the entire state.
+    for message in reversed(response["messages"]):
+        if getattr(message, "type", None) == "ai":
+            if message.content:
+                return message.content
+
+    return "The agent did not return a response."
