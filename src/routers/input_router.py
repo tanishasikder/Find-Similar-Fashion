@@ -25,7 +25,7 @@ async def upload(
         payload: dict = Depends(verify_jwt), # Get this from schemas/jwt.py it verifies the user using jwt
         file: UploadFile = File(...)
     ):
-    user_id = payload['sub']
+    user_id = payload.get('sub')
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

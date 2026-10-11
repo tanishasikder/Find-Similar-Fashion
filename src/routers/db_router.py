@@ -9,7 +9,7 @@ from src.schemas.db import supabase
 from src.services.insert import add_clothes
 router = APIRouter()
 
-TEMPLATE_PATH=os.getenv('TEMPLATE_PATH')
+TEMPLATE_PATH=os.getenv('TEMPLATE_PATH', 'Frontend')
 
 templates = Jinja2Templates(directory=TEMPLATE_PATH)
 

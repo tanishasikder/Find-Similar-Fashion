@@ -4,6 +4,7 @@ from celery.signals import worker_process_init
 from .config import Settings
 from src.schemas.state import load_image_model
 from src.services.predict import predict_image
+
 celery_app = Celery('fashionproject')
 
 # No need to load from env when you do this

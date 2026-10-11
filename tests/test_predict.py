@@ -1,20 +1,21 @@
 import pytest
-from PIL import Image
-import asyncio
-import os
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pathlib import Path
 
-from src.dependencies import get_image_model
-from src.core.lifespan import lifespan
-from fastapi import FastAPI
-app = FastAPI(lifespan=lifespan)
+from src.schemas.state import load_image_model
+from src.services.predict import predict_image
 
-@pytest.mark.asyncio
-async def test_image_output():
-    color, cloth_type = await get_image_model('tests/test_clothing.jpg')
-    assert color.name == 'red'
-    assert cloth_type.name == 'dress'
+TEST_IMAGE = Path(__file__).parent / 'test_clothing.jpg'
+
+@pytest.fixture(scope='module')
+def image_model():
+    # Loading the model is slow so share it across the tests in this file
+    return load_image_model()
+
+def test_image_output(image_model):
+    preds = predict_image(image_model, TEST_IMAGE.read_bytes())
+    assert preds['color'] in image_model.color_names
+    assert preds['category'] in image_model.category_names
+    assert all(a in image_model.apparels for a in preds['attributes'])
 
 
 '''
