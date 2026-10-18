@@ -41,7 +41,9 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme
         payload = jwt.decode(
             token,
             key.key,
-            algorithms=['RS256'],
+            # Supabase signs with ES256 (see the jwks url), RS256 kept for older keys.
+            # Never allow HS256 here, these are public keys
+            algorithms=['ES256', 'RS256'],
             audience=EXPECTED_AUDIENCE,
             issuer=EXPECTED_ISSUER
         )
