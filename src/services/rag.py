@@ -1,8 +1,9 @@
 
 import os
 from pathlib import Path
-
+from pinecone import Pinecone
 from dotenv import load_dotenv
+import os
 from langchain.chat_models import init_chat_model
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
@@ -12,9 +13,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 load_dotenv()
 
 PDF_PATH = Path("fashion.pdf")
-INDEX_NAME = os.environ["PINECONE_INDEX_NAME"]
+pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 NAMESPACE = "fashion-research"
-
 
 def get_embeddings():
     return GoogleGenerativeAIEmbeddings(
@@ -23,11 +23,13 @@ def get_embeddings():
         output_dimensionality=768,
     )
 
-
 def get_vector_store():
     """Connect to an existing Pinecone index."""
+    index = pc.Index(
+        os.environ["PINECONE_INDEX_NAME"]
+    )
     return PineconeVectorStore(
-        index_name=INDEX_NAME,
+        index_name=index,
         embedding=get_embeddings(),
         namespace=NAMESPACE,
     )
@@ -105,7 +107,6 @@ def make_agent():
         system_prompt=system_prompt,
     )
 
-
 async def get_rag_response(query: str):
     agent = make_agent()
 
@@ -122,3 +123,9 @@ async def get_rag_response(query: str):
                 return message.content
 
     return "The agent did not return a response."
+
+if __name__ == '__main__':
+    # Run this once to upsert the documents into Pinecone
+    vector_store = get_vector_store()
+    chunks = ingest_pdf()
+    vector_store.add_documents(documents=chunks)
