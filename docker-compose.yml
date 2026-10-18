@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    image: fashion-app:latest # Built once here, then reused by celery_worker
     command: >
       gunicorn src.main:app
       --workers 3
@@ -17,7 +18,9 @@ services:
     restart: always
 
   celery_worker:
-    build: .
+    # Same code as the api, so reuse its image instead of building a second copy
+    image: fashion-app:latest
+    pull_policy: never
     command: celery -A src.core.celery_app:celery_app worker --loglevel=info -Q queue_image --concurrency=1
     env_file:
       - .env
