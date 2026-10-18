@@ -261,6 +261,29 @@
     .auth-status.show {
       display: block;
     }
+
+    /* --- Prediction result --- */
+    .result-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .result-label {
+      font-weight: 600;
+      min-width: 90px;
+    }
+
+    .tag {
+      display: inline-block;
+      background: #f0e9ff;
+      color: rgb(140, 60, 220);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 0.9rem;
+    }
   </style>
   <!-- Supabase JS client (v2) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -315,29 +338,15 @@
     </div>
 
     <!-- Image Upload Section -->
+    <!-- POST /upload only takes the image (form field "file") and the login token -->
     <div class="card" id="uploadCard">
-      <h2>1. Upload Clothing Image</h2>
-      <input type="file" id="imageUpload" accept="image/*" />
-      <div class="preview-container">
-        <img id="imagePreview" alt="Image preview" />
-      </div>
-    </div>
-
-    <!-- Size + Price Form -->
-    <div class="card" id="submitCard">
-      <h2>2. Enter Size and Price</h2>
+      <h2>Upload a Clothing Image</h2>
       <form id="uploadForm">
-        <div class="form-group">
-          <label for="size">Size</label>
-          <input type="text" id="size" placeholder="e.g. XS, S, M, L, XL" required />
+        <input type="file" id="imageUpload" accept="image/*" required />
+        <div class="preview-container">
+          <img id="imagePreview" alt="Image preview" />
         </div>
-
-        <div class="form-group">
-          <label for="price">Price ($)</label>
-          <input type="number" id="price" step="0.01" min="0" placeholder="e.g. 49.99" required />
-        </div>
-
-        <button type="submit" id="submitBtn">Submit</button>
+        <button type="submit" id="submitBtn">Find My Clothing</button>
       </form>
       <div id="submissionStatus" class="status"></div>
     </div>
@@ -357,7 +366,6 @@
     // --- Auth elements ---
     const authCard = document.getElementById("authCard");
     const uploadCard = document.getElementById("uploadCard");
-    const submitCard = document.getElementById("submitCard");
     const sessionBar = document.getElementById("sessionBar");
     const sessionEmail = document.getElementById("sessionEmail");
     const logoutBtn = document.getElementById("logoutBtn");
@@ -406,12 +414,10 @@
         sessionBar.classList.add("show");
         sessionEmail.textContent = `Signed in as ${session.user.email} (id: ${session.user.id})`;
         uploadCard.classList.remove("locked");
-        submitCard.classList.remove("locked");
       } else {
         authCard.style.display = "block";
         sessionBar.classList.remove("show");
         uploadCard.classList.add("locked");
-        submitCard.classList.add("locked");
       }
     }
 
@@ -482,6 +488,18 @@
     const submissionStatus = document.getElementById("submissionStatus");
     const submitBtn = document.getElementById("submitBtn");
 
+    const MAX_FILE_MB = 20; // Same as client_max_body_size in nginx.conf
+    const POLL_TIMEOUT_MS = 2 * 60 * 1000; // Give up waiting on the worker after 2 minutes
+
+    // Shows a plain text message in the status box. textContent is used
+    // (not innerHTML) so server error text can never inject html
+    function showStatus(message, type) {
+      submissionStatus.textContent = message;
+      submissionStatus.classList.add("show");
+      submissionStatus.classList.remove("error", "success");
+      if (type) submissionStatus.classList.add(type);
+    }
+
     // Handle image preview
     imageUpload.addEventListener("change", () => {
       const file = imageUpload.files[0];
@@ -497,33 +515,83 @@
       submissionStatus.classList.remove("show", "error", "success");
     });
 
-    // Polls GET /status/{task_id} until the Celery task finishes.
-    // onProgress is called after every poll so the UI can show it's still working.
-    async function pollForResult(taskId, onProgress) {
-      while (true) {
-        const res = await fetch(`http://localhost:8000/status/${taskId}`);
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`HTTP ${res.status}: ${errText}`);
-        }
+    // Turns a failed response from FastAPI into a message the user can act on
+    async function errorMessage(res) {
+      if (res.status === 401) return "Your login has expired. Please log out and log in again.";
+      if (res.status === 413) return `That image is too large. Please use one under ${MAX_FILE_MB} MB.`;
+      if (res.status === 429) return "You can upload 3 images per minute. Please wait a moment and try again.";
 
-        const data = await res.json();
-
-        if (onProgress) onProgress(data.status);
-
-        if (data.status === "SUCCESS") {
-          return data.result;
-        }
-        if (data.status === "FAILURE") {
-          throw new Error(data.error || "Prediction failed");
-        }
-
-        // still PENDING/STARTED — wait, then poll again
-        await new Promise((r) => setTimeout(r, 1000));
-      }
+      let detail = "";
+      try {
+        detail = (await res.json()).detail;
+      } catch {}
+      return typeof detail === "string" && detail ? detail : `Something went wrong (HTTP ${res.status}).`;
     }
 
-    // Handle form submission — sends file, size, and price to /predict
+    // Polls GET /status/{task_id} until the Celery task finishes.
+    // It returns {status} while waiting, {status, result} on success, or {status, error} on failure
+    async function pollForResult(taskId, onProgress) {
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+      while (Date.now() < deadline) {
+        const res = await fetch(`/status/${taskId}`);
+        if (!res.ok) throw new Error(await errorMessage(res));
+
+        const data = await res.json();
+        if (onProgress) onProgress(data.status);
+
+        if (data.status === "SUCCESS") return data.result;
+        if (data.status === "FAILURE") {
+          // The worker raises this when PIL can't open the file
+          if ((data.error || "").includes("cannot identify image")) {
+            throw new Error("That file isn't a valid image. Please try a JPG or PNG.");
+          }
+          throw new Error("The prediction failed. Please try again.");
+        }
+
+        // Still PENDING/STARTED, wait then poll again
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      throw new Error("This is taking longer than expected. Please try again in a minute.");
+    }
+
+    // Adds one "Label: value" line to the result box
+    function addResultRow(label, values) {
+      const row = document.createElement("div");
+      row.className = "result-row";
+
+      const name = document.createElement("span");
+      name.className = "result-label";
+      name.textContent = label;
+      row.appendChild(name);
+
+      if (values.length === 0) {
+        const none = document.createElement("span");
+        none.textContent = "None detected";
+        row.appendChild(none);
+      }
+      for (const value of values) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = value;
+        row.appendChild(tag);
+      }
+      submissionStatus.appendChild(row);
+    }
+
+    // Shows the {color, category, attributes} dict from services/predict.py
+    function showResult(result) {
+      showStatus("", "success");
+      const title = document.createElement("strong");
+      title.textContent = "Here's what we found";
+      submissionStatus.appendChild(title);
+
+      addResultRow("Color", [result.color]);
+      addResultRow("Category", [result.category]);
+      addResultRow("Attributes", result.attributes || []);
+    }
+
+    // Sends the image to POST /upload, which only takes the file and the login token
     uploadForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
@@ -537,23 +605,17 @@
         alert("Please upload a clothing image first.");
         return;
       }
+      if (file.size > MAX_FILE_MB * 1024 * 1024) {
+        showStatus(`That image is too large. Please use one under ${MAX_FILE_MB} MB.`, "error");
+        return;
+      }
 
-      const size = document.getElementById("size").value;
-      const price = document.getElementById("price").value;
-
-      // FastAPI /predict expects three multipart form fields:
-      //   - file: UploadFile
-      //   - size: str
-      //   - price: float
+      // Field name must be "file" to match `file: UploadFile = File(...)` in input_router.py
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("size", size);
-      formData.append("price", price);
 
       submitBtn.disabled = true;
-      submissionStatus.innerHTML = "Giving you magic...";
-      submissionStatus.classList.add("show");
-      submissionStatus.classList.remove("error", "success");
+      showStatus("Uploading your image...");
 
       try {
         // Pull the freshest session (the client auto-refreshes the token in the
@@ -563,7 +625,8 @@
           throw new Error("Your session expired. Please log in again.");
         }
 
-        const res = await fetch("http://localhost:8000/upload", {
+        // Relative url so it goes to whichever server is hosting this page
+        const res = await fetch("/upload", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${session.access_token}`
@@ -571,28 +634,20 @@
           body: formData
         });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`HTTP ${res.status}: ${errText}`);
-        }
+        if (!res.ok) throw new Error(await errorMessage(res));
 
-        // /upload now returns a task_id immediately — the actual prediction
-        // is still running in a Celery worker. Poll /status/{task_id} until done.
+        // /upload returns a task_id right away while the prediction runs
+        // in a Celery worker, so poll /status/{task_id} until it's done
         const { task_id } = await res.json();
 
         const result = await pollForResult(task_id, (status) => {
-          submissionStatus.innerHTML = `Processing your image... <em>(${status})</em>`;
+          showStatus(status === "STARTED" ? "Analyzing your clothing..." : "Waiting in line...");
         });
 
-        submissionStatus.innerHTML = `
-          <strong>Prediction complete</strong><br><br>
-          <pre>${JSON.stringify(result, null, 2)}</pre>
-        `;
-        submissionStatus.classList.add("success");
+        showResult(result);
       } catch (err) {
         console.error("Submission error:", err);
-        submissionStatus.innerHTML = `<strong>Error submitting form</strong><br><small>${err.message}</small>`;
-        submissionStatus.classList.add("error");
+        showStatus(err.message, "error");
       } finally {
         submitBtn.disabled = false;
       }

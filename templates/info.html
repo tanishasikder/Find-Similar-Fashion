@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saved Clothes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: rgb(0, 213, 255);
+      margin: 0;
+      padding: 2rem 1rem;
+    }
+    .card {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    h1 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #ddd; }
+    .tag {
+      display: inline-block;
+      background: #eef;
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      margin: 0.1rem;
+      font-size: 0.85rem;
+    }
+    .links { margin-bottom: 1rem; }
+    .links a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Saved Clothes</h1>
+    <div class="links">
+      <a href="/">Upload a photo</a>
+      <a href="/add">Add clothing manually</a>
+    </div>
+
+    {% if clothes %}
+    <table>
+      <thead>
+        <tr><th>Color</th><th>Category</th><th>Attributes</th></tr>
+      </thead>
+      <tbody>
+        {% for item in clothes %}
+        <tr>
+          <td>{{ item.color }}</td>
+          <td>{{ item.category }}</td>
+          <td>
+            {% for attr in item.attributes or [] %}
+            <span class="tag">{{ attr }}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No clothes saved yet.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

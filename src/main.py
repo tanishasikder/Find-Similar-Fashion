@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -30,6 +31,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="Frontend"))
+
+# The homepage is the upload page in Frontend/index.html
+@app.get("/", include_in_schema=False)
+def home():
+    return FileResponse("Frontend/index.html")
 
 app.include_router(input_router) # For accepting user inputs
 app.include_router(db_router) # For storing in the database

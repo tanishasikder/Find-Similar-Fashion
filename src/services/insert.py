@@ -27,7 +27,7 @@ def add_clothes(
         'attributes' : clothes['attributes'] # Go on supabase and add this
     }).execute()
 
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/clothes", status_code=303)
 
 def get_cloth_link(clothes : dict, file_name: str):
     return SUPABASE_BUCKET.get_public_url(cloth_filename(clothes, file_name))
