@@ -12,7 +12,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 load_dotenv()
 
-PDF_PATH = Path("fashion.pdf")
+PDF_PATH = Path("data/context/fashion_info.pdf")
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 NAMESPACE = "fashion-research"
 
@@ -25,9 +25,10 @@ def get_embeddings():
 
 def get_vector_store():
     """Connect to an existing Pinecone index."""
-    index = pc.Index(
-        os.environ["PINECONE_INDEX_NAME"]
-    )
+    index_name = os.environ["PINECONE_INDEX_NAME"]
+
+    index = pc.Index(index_name)
+
     return PineconeVectorStore(
         index_name=index,
         embedding=get_embeddings(),
@@ -126,6 +127,4 @@ async def get_rag_response(query: str):
 
 if __name__ == '__main__':
     # Run this once to upsert the documents into Pinecone
-    vector_store = get_vector_store()
     chunks = ingest_pdf()
-    vector_store.add_documents(documents=chunks)
