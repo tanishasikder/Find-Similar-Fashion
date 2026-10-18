@@ -100,13 +100,3 @@ async def get_similar_clothes(
         raise HTTPException(status_code=503, detail='Could not find similar clothes right now')
     return {'products': products}
 
-# Gets the model predictions right away using the model loaded at startup, no celery
-@router.post('/image_predict')
-@limiter.limit('3/minute')
-async def get_image_preds(request: Request, file: UploadFile = File(...)):
-    contents = await file.read()
-    try:
-        # Inference blocks so run it off the event loop
-        return await run_in_threadpool(predict_image, request.app.state.image_model, contents)
-    except UnidentifiedImageError:
-        raise HTTPException(status_code=400, detail='File is not a valid image')

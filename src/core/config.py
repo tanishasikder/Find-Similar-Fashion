@@ -1,4 +1,9 @@
 import os
+from dotenv import load_dotenv
+
+# Load .env before reading REDIS_URL. celery_app imports this first, so without
+# it a local run ignores .env and tries the docker hostname redis://redis
+load_dotenv()
 
 class Settings:
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")

@@ -30,10 +30,26 @@ image_path = os.environ.get('IMAGE_MODEL')
 
 sets = ['train', 'test']
 
+def color_weights(colors, num_colors):
+    '''
+    Weights for the color loss so rare colors (green, yellow, purple) count
+    more than common ones (black). Uses the square root of the inverse
+    frequency, plain inverse frequency makes the rare colors ~70x heavier
+    and training unstable. Scaled so the average weight is 1
+    '''
+    counts = torch.bincount(torch.as_tensor(colors), minlength=num_colors).float()
+    weights = 1 / counts.clamp(min=1).sqrt()
+    return weights / weights.mean()
+
 # Train on the heads of the vgg16 to learn clothing features
 def train_model(model, criterion, optimizer, scheduler, num_epochs=None):
     color_criterion, cat_criterion, attr_criterion = criterion
     with mlflow.start_run():
+        # Log the color loss weights so runs with different label sets can be compared
+        mlflow.log_params({
+            f'color_weight_{name}': round(w, 3)
+            for name, w in zip(model.color_names, color_criterion.weight.tolist())
+        })
         best_model = copy.deepcopy(model.state_dict())
         best_accuracy = 0.0
         for epoch in range(num_epochs):
@@ -147,10 +163,12 @@ if __name__ == '__main__':
     # Loading the data in batches
     pin = device.type == 'cuda'
     # Enough workers to keep the gpu busy. persistent so Windows does not respawn them every epoch
-    loader_args = dict(batch_size=32, num_workers=8, pin_memory=pin, persistent_workers=True)
+    # Each worker is a full process (~1.5 GB on Windows, mostly torch), and both loaders'
+    # workers stay alive, so the test loader gets fewer since it only runs once per epoch
+    loader_args = dict(batch_size=32, pin_memory=pin, persistent_workers=True)
     fashion_loaders = {
-        'train' : DataLoader(train, shuffle=True, **loader_args),
-        'test' : DataLoader(test, shuffle=False, **loader_args)
+        'train' : DataLoader(train, shuffle=True, num_workers=8, **loader_args),
+        'test' : DataLoader(test, shuffle=False, num_workers=4, **loader_args)
     }
 
     dataset_sizes = {'train': train_size, 'test': test_size}
@@ -159,9 +177,17 @@ if __name__ == '__main__':
     class_names = get_class_names()
     model = CNN(*class_names)
 
+    # Only from the train split so the test set doesn't leak into training
+    weights = color_weights(train.colors, len(class_names[0]))
+    print('Color loss weights:', {name: round(w, 2) for name, w in zip(class_names[0], weights.tolist())})
+
     # Color and category are single label so crossentropy
     # Attribute is multi label so bce loss
-    criterion = (nn.CrossEntropyLoss(), nn.CrossEntropyLoss(), nn.BCEWithLogitsLoss())
+    criterion = (
+        nn.CrossEntropyLoss(weight=weights.to(device)),
+        nn.CrossEntropyLoss(),
+        nn.BCEWithLogitsLoss(),
+    )
     # Only the heads are trained since the vgg16 features are frozen
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.SGD(params, lr=1e-3, momentum=0.9, weight_decay=1e-4)
