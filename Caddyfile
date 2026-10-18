@@ -1,0 +1,12 @@
+# Caddy serves these domains over HTTPS and redirects http:// to https://
+findsimilar.shop, www.findsimilar.shop {
+	# Same upload limit nginx had
+	request_body {
+		max_size 20MB
+	}
+
+	reverse_proxy api:8000 {
+		# The rate limiter in src/core/limiter.py reads the user's ip from this header
+		header_up X-Real-IP {remote_host}
+	}
+}

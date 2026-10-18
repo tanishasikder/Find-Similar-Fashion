@@ -34,12 +34,21 @@ services:
     image: redis:7-alpine
     restart: always
 
-  nginx:
-    image: nginx:1.27
+  # Reverse proxy in front of the api. Caddy gets and renews the
+  # HTTPS certificate for the domains in the Caddyfile automatically
+  caddy:
+    image: caddy:2.8
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # Keeps the certificates between restarts
+      - caddy_config:/config
     depends_on:
       - api
     restart: always
+
+volumes:
+  caddy_data:
+  caddy_config:
