@@ -262,6 +262,13 @@
       display: block;
     }
 
+    /* --- RAG trend insights --- */
+    .insights {
+      margin-top: 12px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+
     /* --- Prediction result --- */
     .result-row {
       display: flex;
@@ -591,6 +598,34 @@
       addResultRow("Attributes", result.attributes || []);
     }
 
+    // Sends the prediction to POST /query and shows the RAG agent's trend insights
+    // under the result. A failure here only shows a note, the prediction stays visible
+    async function showInsights(result, accessToken) {
+      const box = document.createElement("div");
+      box.className = "insights";
+      box.textContent = "Looking up fashion trends...";
+      submissionStatus.appendChild(box);
+
+      try {
+        const res = await fetch("/query", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(result)
+        });
+        if (!res.ok) throw new Error(await errorMessage(res));
+
+        const { answer } = await res.json();
+        // textContent so the model's text can never inject html
+        box.textContent = answer;
+      } catch (err) {
+        console.error("Insights error:", err);
+        box.textContent = `Couldn't load fashion insights: ${err.message}`;
+      }
+    }
+
     // Sends the image to POST /upload, which only takes the file and the login token
     uploadForm.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -645,6 +680,7 @@
         });
 
         showResult(result);
+        await showInsights(result, session.access_token);
       } catch (err) {
         console.error("Submission error:", err);
         showStatus(err.message, "error");

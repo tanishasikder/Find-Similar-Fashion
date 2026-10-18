@@ -1,14 +1,20 @@
 import base64
+import logging
+from typing import List
 from celery.result import AsyncResult
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi import Request, status
 from fastapi import Depends
 from fastapi.concurrency import run_in_threadpool
 from PIL import UnidentifiedImageError
+from pydantic import BaseModel
 from src.core.limiter import limiter
 from src.core.celery_app import celery_app, process_img
 from src.schemas.jwt import verify_jwt
 from src.services.predict import predict_image
+from src.services.rag import build_query, get_rag_response
+
+logger = logging.getLogger(__name__)
 
 # No prefix since the frontend calls /upload and /status directly
 router = APIRouter()
@@ -49,11 +55,27 @@ def task_status(task_id: str):
         return {'status': 'FAILURE', 'error': str(result.result)}
     return {'status': result.status} # PENDING or STARTED
 
-# Use with services/rag function get_rag_response
-@router.get("/query")
+# Same shape as the dict services/predict.py returns
+class Prediction(BaseModel):
+    color: str
+    category: str
+    attributes: List[str] = []
+
+# The frontend calls this after /status gives back the image prediction.
+# The RAG agent describes the clothing and how it fits recent trends
+@router.post("/query")
 @limiter.limit('3/minute')
-async def get_query_rag(request : Request, query: str):
-    return query
+async def get_query_rag(
+        request : Request,
+        prediction: Prediction,
+        payload: dict = Depends(verify_jwt) # Each call costs Gemini/Pinecone usage so require login
+    ):
+    try:
+        answer = await get_rag_response(build_query(prediction.model_dump()))
+    except Exception:
+        logger.exception('RAG request failed')
+        raise HTTPException(status_code=503, detail='Could not get fashion insights right now')
+    return {'answer': answer}
 
 # Gets the model predictions right away using the model loaded at startup, no celery
 @router.post('/image_predict')

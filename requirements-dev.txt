@@ -16,7 +16,7 @@ pytest==7.4.4
 langchain==1.2.8
 langchain-community==0.4.1
 langchain-text-splitters==1.1.0
-langchain-google-genai
+langchain-groq
 langchain-pinecone
 pypdf
 channel3-sdk==4.1.0

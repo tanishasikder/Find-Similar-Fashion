@@ -1,46 +1,62 @@
-
 import os
+from functools import lru_cache
 from pathlib import Path
-from pinecone import Pinecone
 from dotenv import load_dotenv
-import os
-from langchain.chat_models import init_chat_model
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_pinecone import PineconeVectorStore
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.agents import create_agent
+from langchain.tools import tool
+from langchain_groq import ChatGroq
+from langchain_pinecone import PineconeEmbeddings, PineconeVectorStore
+from pinecone import Pinecone
 
 load_dotenv()
 
-PDF_PATH = Path("data/context/fashion_info.pdf")
-pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+BASE_DIR = Path(__file__).resolve().parents[2] # Project root, so paths work from any cwd
+PDF_PATH = BASE_DIR / "data/context/fashion_info.pdf"
 NAMESPACE = "fashion-research"
 
+SYSTEM_PROMPT = """
+The user uploaded a picture of clothing and wants to find similar clothes.
+You are given the color, category, and attributes the image model predicted.
+Always call the retrieval_context tool first to look up recent fashion trends
+related to the clothing. Then describe the clothing they uploaded using only the
+predicted color, category, and attributes (you cannot see the image, so don't
+invent details like zippers, collars, or fit). Explain how
+it fits with the trends you found, and suggest similar styles to look for.
+Only use trend information from the retrieved context. If nothing relevant
+is found, say so instead of making trends up.
+"""
+
 def get_embeddings():
-    return GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
-        google_api_key=os.environ["GOOGLE_API_KEY"],
-        output_dimensionality=768,
+    # Groq has no embedding models, so Pinecone's hosted model makes the vectors.
+    # llama-text-embed-v2 outputs 1024 numbers, which must match the index dimension
+    return PineconeEmbeddings(
+        model="llama-text-embed-v2",
+        pinecone_api_key=os.environ["PINECONE_API_KEY"],
     )
 
+@lru_cache(maxsize=1)
 def get_vector_store():
-    """Connect to an existing Pinecone index."""
-    index_name = os.environ["PINECONE_INDEX_NAME"]
-
-    index = pc.Index(index_name)
+    """Connect to an existing Pinecone index. Cached so it is only built once per process"""
+    # Made here instead of at import so the app can still start without the keys
+    pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+    index = pc.Index(os.environ["PINECONE_INDEX_NAME"])
 
     return PineconeVectorStore(
-        index_name=index,
+        index=index, # index_name only takes a string, the Index object goes here
         embedding=get_embeddings(),
         namespace=NAMESPACE,
     )
 
 
 def ingest_pdf():
-    """Run once to load fashion.pdf and index its chunks."""
+    """Run once to load fashion_info.pdf and index its chunks."""
+    # Only needed for ingesting, so the api doesn't have to install these
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     if not PDF_PATH.is_file():
         raise FileNotFoundError(
-            f"Could not find {PDF_PATH.resolve()}"
+            f"Could not find {PDF_PATH}"
         )
 
     loader = PyPDFLoader(str(PDF_PATH))
@@ -63,49 +79,47 @@ def ingest_pdf():
     return len(chunks)
 
 
+@tool(response_format="content_and_artifact")
+def retrieval_context(query: str):
+    """Search fashion research in Pinecone for relevant evidence."""
+    docs = get_vector_store().similarity_search(query, k=4)
+
+    if not docs:
+        return "No relevant documents found.", []
+
+    context = "\n\n".join(
+        f"Source: {doc.metadata.get('source', 'unknown')}, "
+        f"page: {doc.metadata.get('page', 'unknown')}\n"
+        f"{doc.page_content}"
+        for doc in docs
+    )
+
+    return context, docs
+
+
+@lru_cache(maxsize=1)
 def make_agent():
-    """Create the Gemini agent and connect its retrieval tool."""
-    model = init_chat_model(
-        "google_genai:gemini-2.5-flash",
+    """Create the Groq agent and connect its retrieval tool. Built once and reused"""
+    model = ChatGroq(
+        model="openai/gpt-oss-120b", # Supports tool calling on Groq
+        api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
         max_tokens=2048,
     )
 
-    store = get_vector_store()
-
-    from langchain.tools import tool
-
-    @tool(response_format="content_and_artifact")
-    def retrieval_context(query: str):
-        """Search fashion research in Pinecone for relevant evidence."""
-        docs = store.similarity_search(query, k=4)
-
-        if not docs:
-            return "No relevant documents found.", []
-
-        context = "\n\n".join(
-            f"Source: {doc.metadata.get('source', 'unknown')}, "
-            f"page: {doc.metadata.get('page', 'unknown')}\n"
-            f"{doc.page_content}"
-            for doc in docs
-        )
-
-        return context, docs
-
-    system_prompt = """
-        The user wants to find similar clothes to what they
-        uploaded. Describe the clothes they uploaded along with
-        information given about recent fashion trends/
-
-        Context: {context}
-    """
-
-    from langchain.agents import create_agent
-
     return create_agent(
         model,
         tools=[retrieval_context],
-        system_prompt=system_prompt,
+        system_prompt=SYSTEM_PROMPT,
+    )
+
+def build_query(prediction: dict):
+    """Turns the {color, category, attributes} dict from services/predict.py into a question"""
+    attrs = ", ".join(prediction.get("attributes") or []) or "none detected"
+    return (
+        f"I uploaded a {prediction['color']} {prediction['category']}. "
+        f"Attributes: {attrs}. "
+        "Describe it and tell me how it fits with recent fashion trends."
     )
 
 async def get_rag_response(query: str):
@@ -120,11 +134,13 @@ async def get_rag_response(query: str):
     # Return the final assistant message, not the entire state.
     for message in reversed(response["messages"]):
         if getattr(message, "type", None) == "ai":
-            if message.content:
-                return message.content
+            # .text joins the content into a string even when it comes back as a list of blocks
+            if message.text:
+                return message.text
 
     return "The agent did not return a response."
 
 if __name__ == '__main__':
-    # Run this once to upsert the documents into Pinecone
+    # Run this once to upsert the documents into Pinecone: python -m src.services.rag
     chunks = ingest_pdf()
+    print(f"Indexed {chunks} chunks into namespace '{NAMESPACE}'")
