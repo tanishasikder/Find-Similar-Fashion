@@ -4,13 +4,14 @@ from typing import List
 from celery.result import AsyncResult
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi import Request, status
-from fastapi import Depends
+from fastapi import Depends, Form
 from fastapi.concurrency import run_in_threadpool
 from PIL import UnidentifiedImageError
 from pydantic import BaseModel
 from src.core.limiter import limiter
 from src.core.celery_app import celery_app, process_img
 from src.schemas.jwt import verify_jwt
+from src.services.clothing_search import search_products
 from src.services.predict import predict_image
 from src.services.rag import build_query, get_rag_response
 
@@ -76,6 +77,28 @@ async def get_query_rag(
         logger.exception('RAG request failed')
         raise HTTPException(status_code=503, detail='Could not get fashion insights right now')
     return {'answer': answer}
+
+# The frontend calls this after /status gives back the image prediction.
+# Searches stores with the same image plus the predicted color and category
+@router.post("/similar")
+@limiter.limit('3/minute')
+async def get_similar_clothes(
+        request : Request,
+        file: UploadFile = File(...),
+        color: str = Form(...),
+        category: str = Form(...),
+        payload: dict = Depends(verify_jwt) # Each call costs Channel3 usage so require login
+    ):
+    contents = await file.read()
+    try:
+        # The Channel3 client blocks so run it off the event loop
+        products = await run_in_threadpool(search_products, contents, color, category)
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail='File is not a valid image')
+    except Exception:
+        logger.exception('Similar clothes search failed')
+        raise HTTPException(status_code=503, detail='Could not find similar clothes right now')
+    return {'products': products}
 
 # Gets the model predictions right away using the model loaded at startup, no celery
 @router.post('/image_predict')
