@@ -1,7 +1,11 @@
 .env
 mlflow.db
 mlruns/
-data/
+# Keep data/ out of git except the class labels the app loads at startup
+data/*
+!data/Labels/
+data/Labels/*
+!data/Labels/image_extraction_classes.json
 __pycache__/
 *.pyc
 *.log

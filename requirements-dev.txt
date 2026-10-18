@@ -1,0 +1,22 @@
+# Extra packages for local work: training, tests, and the RAG/search services.
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+# For GPU training, reinstall torch afterwards from the cu128 index:
+#   pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+
+# Training (src/models/train_image_extraction.py, image_data.py)
+mlflow==3.8.1
+pandas==2.3.3
+scikit-learn==1.8.0
+tqdm==4.67.1
+
+# Tests
+pytest==7.4.4
+
+# RAG and product search (src/services/rag.py, clothing_search.py)
+langchain==1.2.8
+langchain-community==0.4.1
+langchain-text-splitters==1.1.0
+langchain-google-genai
+langchain-pinecone
+pypdf
+channel3-sdk==4.1.0

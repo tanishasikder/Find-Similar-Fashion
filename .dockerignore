@@ -1,2 +1,20 @@
 .env
 .git
+.github
+.vscode
+.pytest_cache
+**/__pycache__
+*.pyc
+
+# Training and experiment files the API doesn't need
+notebooks
+mlruns
+mlflow.db
+training.log
+requirements-full.txt
+requirements-dev.txt
+tests
+
+# The app only reads the class labels from data/ at runtime
+data/*
+!data/Labels/image_extraction_classes.json
