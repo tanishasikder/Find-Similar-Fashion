@@ -17,9 +17,6 @@ async def lifespan(app: FastAPI):
     tracker.initialize()
     app.state.tracker = tracker
 
-    # Initialize a shared source (http client pool)
-    app.state.http_client = httpx.AsyncClient()
-
     yield # Let the app process
 
     await app.state.http_client.aclose()
